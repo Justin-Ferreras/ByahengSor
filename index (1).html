@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>ByahengSor</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://unpkg.com/protomaps-leaflet@5.0.0/dist/protomaps-leaflet.js"></script>
+<style>
+:root{--bg:#f6f7f4;--card:#fff;--tx:#1b2a22;--mu:#66756c;--pr:#0f7b4f;--bd:#dde3dd}
+@media(prefers-color-scheme:dark){:root{--bg:#121815;--card:#1b2420;--tx:#e8efe9;--mu:#8fa196;--bd:#2c3a33}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,sans-serif}
+header{background:var(--pr);color:#fff;padding:14px 16px}header h1{margin:0;font-size:22px}header p{margin:2px 0 0;opacity:.85;font-size:13px}
+main{max-width:760px;margin:0 auto;padding:12px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:12px;margin-bottom:12px}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+button,select{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx)}
+button.on{background:var(--pr);color:#fff;border-color:var(--pr)}
+#pm{display:none;height:60vh;min-height:340px;border-radius:10px;z-index:0}
+.dot{border-radius:50%;border:3px solid #fff;box-shadow:0 0 3px #0006}
+#rt{display:block;width:100%;max-height:70vh;background:var(--bg);border:1px solid var(--bd);border-radius:10px}
+#rt text{paint-order:stroke;stroke:#0008;stroke-width:2px}
+.lg span{font-size:12px;color:var(--mu);margin-right:10px}h3{margin:0 0 8px;font-size:16px}
+table{width:100%;border-collapse:collapse;font-size:14px}td{padding:6px 0;border-bottom:1px solid var(--bd)}
+th{font-size:12px;font-weight:600;color:var(--mu);text-align:right;padding:2px 0 6px}th:first-child{text-align:left}td.r{text-align:right;white-space:nowrap}
+.n{display:inline-block;width:20px;height:20px;border-radius:50%;color:#fff;text-align:center;font-size:11px;line-height:20px;margin-right:8px;font-weight:700}
+.big{font-size:26px;font-weight:700;color:var(--pr)}.note{font-size:12px;color:var(--mu)}.warn{color:#d64545;font-weight:600}
+</style></head><body>
+<header><h1>🚐 ByahengSor</h1><p>Modern PUJ route tracker · Sorsogon City (SITEX) ⇄ Casiguran ⇄ Juban</p></header>
+<main>
+<div class="card">
+ <div class="row"><button id="tk" class="on" onclick="toggleTrack()">▶ Start GPS tracking</button><button class="mb" style="display:none" onclick="center()">🎯 Center on me</button><button class="mb" style="display:none" onclick="map.fitBounds(line.getBounds(),{padding:[20,20]})">🗺️ Fit route</button></div>
+ <p id="st" style="margin:10px 0 0">Tap “Start GPS tracking” while riding or waiting. Your position is matched to the PUJ route and arrival times are estimated.</p>
+</div>
+<div class="card">
+ <div class="lg"><span>🟢 Loading</span><span>🔴 Unloading</span><span>🟡 Loading &amp; unloading</span><span>🔵 You</span></div>
+ <div id="pm"></div>
+ <svg id="rt" viewBox="0 0 360 520"></svg>
+ <p id="info" class="note">Tap a numbered stop for details. Map © OpenStreetMap contributors, tiles by Protomaps (self-hosted <code>sorsogon.pmtiles</code>). If that file is missing, a simple route diagram is shown instead.</p>
+</div>
+<div class="card">
+ <h3>Fare calculator</h3>
+ <div class="row"><select id="f" onchange="fare()"></select>→<select id="t" onchange="fare()"></select>
+ <select id="k" onchange="fare()"><option value="0">Regular</option><option value="1">Student / Elderly / PWD (20% off)</option></select></div>
+ <p style="margin:10px 0 6px"><span class="big" id="fa">₱0.00</span></p>
+ <table><tr><td>Distance</td><td class="r" id="dist"></td></tr><tr><td>Estimated travel time</td><td class="r" id="etm"></td></tr></table>
+ <p class="note">Aircon Modern &amp; Electric PUJ General Fare Guide (LTRFB), effective Sept 28, 2026: first 4 km ₱17.00 (₱13.60 discounted), then +₱2.40/km (₱1.92), rounded to the nearest ₱0.25.</p>
+</div>
+<div class="card"><div class="row" style="margin-bottom:8px"><h3 style="margin:0">Stops &amp; ETA</h3><button id="d0" class="on" onclick="setDir(0)">City → Juban</button><button id="d1" onclick="setDir(1)">Juban → City</button></div><table id="list"></table>
+<p class="note">Distance is measured from the starting terminal, or from you while GPS tracking is on. Estimated times assume about 25 km/h on average; with GPS on, ETAs use your live speed and show the clock time.</p></div>
+</main>
+<script>
+// Stops in route order. Coordinates are approximate - replace with surveyed ones (esp. SITEX and Casiguran).
+const S=[
+{n:"SITEX Terminal (Sorsogon City)",la:12.9749668,lo:124.0205071,ty:"both",nt:"Main loading bay for Juban-bound units."},
+{n:"Provincial Capitol / City Hall",la:12.9712,lo:124.0068,ty:"both",nt:"Pick-up and drop-off along the road."},
+{n:"Cabid-an",la:12.9600,lo:124.0020,ty:"unload",nt:"Drop-off point."},
+{n:"Bibincahan",la:12.9400,lo:124.0010,ty:"load",nt:"Loading point."},
+{n:"Salog / Bulabog area",la:12.9150,lo:123.9980,ty:"both",nt:"Roadside stop."},
+{n:"Buenavista area",la:12.8880,lo:123.9950,ty:"unload",nt:"Drop-off point."},
+{n:"Casiguran Poblacion",la:12.8690,lo:124.0190,ty:"both",nt:"Loading and unloading area in Casiguran."},
+{n:"Juban (end of line)",la:12.8047607,lo:123.9638531,ty:"both",nt:"End of line / return loading bay."}];
+const A=[S[0].la,S[0].lo],Z=[S[S.length-1].la,S[S.length-1].lo];
+const AVG=25/3.6; // m/s
+const col={both:"#e8a317",load:"#1a9e5c",unload:"#d64545"},tyName={both:"Loading & unloading area",load:"Loading area",unload:"Unloading area"};
+let pts=S.map(s=>[s.la,s.lo]),fac=1.25,cum=[],stops=[],dir=0,box=null;
+const hav=(a,b)=>{const r=Math.PI/180,x=Math.sin((b[0]-a[0])*r/2)**2+Math.cos(a[0]*r)*Math.cos(b[0]*r)*Math.sin((b[1]-a[1])*r/2)**2;return 12742000*Math.asin(Math.sqrt(x))};
+const mins=s=>Math.max(1,Math.round(s/60))+" min";
+const clk=s=>new Date(Date.now()+s*1000).toLocaleTimeString([],{hour:"numeric",minute:"2-digit"});
+function prep(){cum=[0];for(let i=1;i<pts.length;i++)cum.push(cum[i-1]+hav(pts[i-1],pts[i])*fac)}
+function snap(ll){const k=Math.cos(ll[0]*Math.PI/180);let b={dist:1e12};
+ for(let i=1;i<pts.length;i++){const a=pts[i-1],c=pts[i],ax=a[1]*k,ay=a[0],dx=c[1]*k-ax,dy=c[0]-ay;
+  let u=((ll[1]*k-ax)*dx+(ll[0]-ay)*dy)/(dx*dx+dy*dy||1);u=Math.max(0,Math.min(1,u));
+  const q=[a[0]+(c[0]-a[0])*u,a[1]+(c[1]-a[1])*u],dd=hav(ll,q);
+  if(dd<b.dist)b={dist:dd,q,d:cum[i-1]+(cum[i]-cum[i-1])*u}}return b}
+function frame(){const la=pts.map(p=>p[0]),lo=pts.map(p=>p[1]),a=Math.min(...la),b=Math.max(...la),c=Math.min(...lo),e=Math.max(...lo),
+ k=Math.cos((a+b)/2*Math.PI/180),P=24,H=520,sc=Math.min(300/Math.max((e-c)*k,1e-9),(H-2*P)/(b-a)),w=(e-c)*k*sc,W=Math.max(240,w+2*P),ox=(W-w)/2;
+ box={W,H,proj:ll=>[ox+(ll[1]-c)*k*sc,P+(b-ll[0])*sc]}}
+function draw(){frame();const pr=box.proj;
+ let h=`<polyline points="${pts.map(p=>pr(p).map(v=>v.toFixed(1)).join(",")).join(" ")}" fill="none" stroke="#0f7b4f" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" opacity=".85"/>`;
+ stops.forEach((s,i)=>{const [x,y]=pr(s.q);h+=`<g onclick="pick(${i})" style="cursor:pointer"><circle cx="${x}" cy="${y}" r="10" fill="${col[s.ty]}" stroke="#fff" stroke-width="2"/><text x="${x}" y="${y+3.5}" text-anchor="middle" font-size="10" font-weight="700" fill="#fff">${i+1}</text></g>`});
+ h+=`<circle id="me" r="7" fill="#2b7de9" stroke="#fff" stroke-width="3" display="none"/>`;
+ rt.setAttribute("viewBox",`0 0 ${box.W} ${box.H}`);rt.innerHTML=h;if(cur)setMe(cur)}
+function setMe(c){if(map){if(!meM)meM=L.circleMarker(c,{radius:9,color:"#fff",weight:3,fillColor:"#2b7de9",fillOpacity:1}).addTo(map);else meM.setLatLng(c);if(first){map.setView(c,15);first=false}}
+ const m=rt.querySelector("#me");if(!m||!box)return;const [x,y]=box.proj(c);m.setAttribute("cx",x);m.setAttribute("cy",y);m.setAttribute("display","")}
+function pick(i){const s=stops[i];info.innerHTML=`<b>${i+1}. ${s.n}</b> · ${tyName[s.ty]} · ${(s.d/1000).toFixed(1)} km from SITEX<br>${s.nt}`}
+function build(){prep();
+ stops=S.map(s=>{const r=snap([s.la,s.lo]);return{...s,d:r.d,q:r.q,off:r.dist}}).sort((a,b)=>a.d-b.d);
+ const fv=f.value||0,tv=t.value||stops.length-1;f.innerHTML=t.innerHTML="";
+ stops.forEach((s,i)=>{f.add(new Option(s.n,i));t.add(new Option(s.n,i))});f.value=fv;t.value=tv;fare();render();draw();if(map)drawMap()}
+let wid=null,cur=null,lastD=null,spd=null,live=null,first=true,map=null,mk=null,line=null,meM=null;
+const PM="sorsogon.pmtiles"; // put this file next to index.html
+function initMap(){pm.style.display="block";rt.style.display="none";document.querySelectorAll(".mb").forEach(b=>b.style.display="");
+ map=L.map("pm");
+ protomapsL.leafletLayer({url:PM,flavor:matchMedia("(prefers-color-scheme: dark)").matches?"dark":"light",lang:"en"}).addTo(map);
+ map.attributionControl.addAttribution('© <a href="https://openstreetmap.org/copyright">OpenStreetMap</a> contributors · <a href="https://protomaps.com">Protomaps</a>');
+ mk=L.layerGroup().addTo(map);line=L.polyline(pts,{color:"#0f7b4f",weight:6,opacity:.85}).addTo(map);
+ drawMap();map.fitBounds(line.getBounds(),{padding:[20,20]});if(cur)setMe(cur)}
+function drawMap(){line.setLatLngs(pts);mk.clearLayers();
+ stops.forEach((s,i)=>L.marker(s.q,{icon:L.divIcon({className:"",html:`<div class="dot" style="width:26px;height:26px;background:${col[s.ty]};color:#fff;font:700 12px/20px system-ui;text-align:center">${i+1}</div>`,iconSize:[26,26],iconAnchor:[13,13]})}).addTo(mk)
+  .bindPopup(`<b>${i+1}. ${s.n}</b><br>${tyName[s.ty]} · ${(s.d/1000).toFixed(1)} km from SITEX<br>${s.nt}`))}
+function center(){cur?map.setView(cur,16):st.textContent="Start GPS tracking first."}
+build();
+fetch(PM,{headers:{Range:"bytes=0-1"}}).then(x=>{if(x.status!==206)throw 0;if(typeof L=="undefined"||typeof protomapsL=="undefined")throw 0;initMap()}).catch(()=>{info.innerHTML="Map file <code>sorsogon.pmtiles</code> not found (or host lacks range requests) - showing the simple route diagram."});
+fetch(`https://router.project-osrm.org/route/v1/driving/${A[1]},${A[0]};${Z[1]},${Z[0]}?overview=full&geometries=geojson`)
+ .then(r=>r.json()).then(d=>{if(d.routes&&d.routes[0]){pts=d.routes[0].geometry.coordinates.map(c=>[c[1],c[0]]);fac=1;build();lastD=null;const far=stops.filter(s=>s.off>500).map(s=>s.n+" ("+(s.off/1000).toFixed(1)+" km away)");if(far.length)info.innerHTML="<span class='warn'>Check these stop locations, they are far from the road route:</span> "+far.join(", ");if(map)map.fitBounds(line.getBounds(),{padding:[20,20]})}}).catch(()=>{st.innerHTML="<span class='warn'>Could not load the road route; using straight lines between stops (distances +25%).</span>"});
+function setDir(d){dir=d;d0.className=d?"":"on";d1.className=d?"on":"";render()}
+function fare(){if(!stops.length)return;if(f.value===t.value){fa.textContent="₱0.00";dist.textContent=etm.textContent="";return}
+ const m=Math.abs(stops[f.value].d-stops[t.value].d),k=Math.max(1,Math.ceil(m/1000)),dc=+document.getElementById("k").value;
+ const b=dc?13.6+Math.max(0,k-4)*1.92:17+Math.max(0,k-4)*2.4;fa.textContent="₱"+(Math.round(b*4)/4).toFixed(2);dist.textContent="≈ "+k+" km";etm.textContent="≈ "+mins(m/AVG)}
+function render(){if(!stops.length)return;const a=dir?[...stops].reverse():stops,o=a[0].d,dm=x=>(x/1000).toFixed(1)+" km";
+ list.innerHTML="<tr><th>Stop</th><th>Distance</th><th>ETA</th></tr>"+a.map(s=>{const i=stops.indexOf(s);let km,e;
+  if(live){if(dir?s.d<live.d-20:s.d>live.d+20){const m=Math.abs(s.d-live.d),sec=m/live.v;km=dm(m);e=`<b>${clk(sec)}</b><br>${mins(sec)}`}else{km="–";e="passed"}}
+  else{const m=Math.abs(s.d-o);km=dm(m);e="≈ "+mins(m/AVG)}
+  return `<tr><td><span class="n" style="background:${col[s.ty]}">${i+1}</span>${s.n}<br><span class="note">${tyName[s.ty]}</span></td><td class="r note">${km}</td><td class="r note">${e}</td></tr>`}).join("")}
+// ---- Live GPS tracking ----
+function stopTrack(msg){if(wid!==null)navigator.geolocation.clearWatch(wid);wid=null;cur=null;spd=null;lastD=null;live=null;
+ if(meM){meM.remove();meM=null}const m=rt.querySelector("#me");if(m)m.setAttribute("display","none");tk.textContent="▶ Start GPS tracking";tk.className="on";st.innerHTML=msg;render()}
+function toggleTrack(){
+ if(wid!==null){stopTrack("Tracking stopped.");return}
+ if(!navigator.geolocation){st.innerHTML="<span class='warn'>This browser has no GPS support.</span>";return}
+ lastD=null;first=true;tk.textContent="⏹ Stop tracking";tk.className="";st.textContent="Waiting for GPS signal…";
+ wid=navigator.geolocation.watchPosition(onPos,e=>{const m="<span class='warn'>Location unavailable: "+e.message+". Allow location access for this site (HTTPS is required).</span>";if(e.code===1)stopTrack(m);else st.innerHTML=m},{enableHighAccuracy:true,maximumAge:2000,timeout:30000})}
+function onPos(p){const c=[p.coords.latitude,p.coords.longitude];cur=c;setMe(c);
+ const r=snap(c),total=cum[cum.length-1];
+ if(r.dist>150){live=null;render();st.innerHTML=`<span class="warn">⚠️ Off route</span> — you are about ${Math.round(r.dist)} m from the Sorsogon City–Juban road.`;return}
+ if(lastD===null)lastD=r.d;else if(Math.abs(r.d-lastD)>Math.max(25,p.coords.accuracy||0)){dir=r.d>lastD?0:1;lastD=r.d;setDir(dir)}
+ if(p.coords.speed!=null&&p.coords.speed>=0)spd=spd==null?p.coords.speed:spd*.7+p.coords.speed*.3;
+ const v=spd>2?(spd+AVG)/2:AVG;live={d:r.d,v};
+ const nx=dir?[...stops].reverse().find(s=>s.d<r.d-20):stops.find(s=>s.d>r.d+20),end=dir?stops[0]:stops[stops.length-1];
+ const prog=Math.round((dir?total-r.d:r.d)/total*100);
+ let h=`🚐 On route · <b>${dir?"Juban → City":"City → Juban"}</b> · ${prog}% of the way`;
+ const dtxt=m=>m>=1000?(m/1000).toFixed(1)+" km":Math.round(m)+" m";
+ if(nx){const m=Math.abs(nx.d-r.d);h+=`<br>Next stop: <b>${nx.n}</b><br>Distance: <b>${dtxt(m)}</b><br>ETA: <b>${clk(m/v)}</b> (~${mins(m/v)})`}
+ if(Math.abs(end.d-r.d)>50){const m=Math.abs(end.d-r.d);h+=`<br>Final stop: <b>${end.n}</b><br>Distance: <b>${dtxt(m)}</b><br>ETA: <b>${clk(m/v)}</b> (~${mins(m/v)})`}
+ else h+="<br>You have reached the end of the line.";
+ st.innerHTML=h;render()}
+</script></body></html>
